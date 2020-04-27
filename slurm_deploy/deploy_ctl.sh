@@ -234,7 +234,7 @@ function get_repo_item_lst() {
 
 function deploy_build_item() {
     item_inst=$1
-    item=$(get_item $item_inst)
+    item=$(get_item "${item_inst}")
     light=$2
 
     sdir=$(pwd)
@@ -242,49 +242,47 @@ function deploy_build_item() {
     distribute_nodes=$(distribute_get_nodes) # nodes on which the software will be distributed
     build_node=$(hostname)
     if [ -n "$distribute_nodes" ]; then
-        build_node=$(scontrol show hostname $distribute_nodes | head -n 1) # get first node for run build on it
+        build_node=$(scontrol show hostname "${distribute_nodes}" | head -n 1) # get first node for run build on it
     fi
 
-    build_cpus=$(ssh $build_node "grep -c ^processor /proc/cpuinfo")
+    build_cpus=$(ssh "${build_node}" "grep -c ^processor /proc/cpuinfo")
 
-    cd $SRC_DIR/$item
-    echo Starting \"$item\" build
-
-    ssh "${build_node}" gcc --version
-
-    # TODO debug
-    module load dev/gcc-7.4.0
-    CC=$(command -v gcc)
-
-    ssh "${build_node}" gcc --version
+    cd "$SRC_DIR/$item" || exit 1
+    echo "Starting '$item' build"
 
     # add tools path
-    tools_installed=$(ssh $build_node "test ! -d $INSTALL_DIR/tools/bin")
-    if [ $(
-        ssh $build_node test ! -d $INSTALL_DIR/tools/bin
+    #    tools_installed=$(ssh $build_node "test ! -d $INSTALL_DIR/tools/bin")
+    if [ "$(
+        ssh "${build_node}" test ! -d "${INSTALL_DIR}/tools/bin"
         echo $?
-    ) ]; then
-        tools_path="$INSTALL_DIR/tools/bin"
+    )" ]; then
+        tools_path="${INSTALL_DIR}/tools/bin"
     fi
 
+    COMPILER_DIR="/hpc/local/oss/gcc-7.4.0"
+
     if [ ! -f "configure" ]; then
-        rpath=$(ssh $build_node 'echo $PATH')
+        R_PATH=$(ssh "${build_node}" 'echo $PATH')
+        R_LD_LIBRARY_PATH=$(ssh "${build_node}" 'echo ${LD_LIBRARY_PATH}')
+
         if [ -f "autogen.sh" ]; then
-            pdsh -S -w $build_node "export PATH=$tools_path:$rpath ; cd $PWD && CC=$CC ./autogen.sh"
+            pdsh -S -w "${build_node}" "cd $PWD && PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} ./autogen.sh"
         elif [ -f "autogen.pl" ]; then
-            pdsh -S -w $build_node "export PATH=$tools_path:$rpath ; cd $PWD && CC=$CC ./autogen.pl"
+            pdsh -S -w {${build_node}} "cd $PWD && PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} ./autogen.pl"
         else
-            pdsh -S -w $build_node "export PATH=$tools_path:$rpath ; cd $PWD && CC=$CC autoreconf"
+            pdsh -S -w "${build_node}" "cd $PWD && PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} autoreconf"
         fi
+
         ret=$?
+
         if [ "$ret" != "0" ]; then
             echo_error $LINENO "\"$item\" Remote Autogen error. Tries to run Autogen locally..."
             if [ -f "autogen.sh" ]; then
-                export PATH=$tools_path:$PATH && CC=$CC ./autogen.sh
+                PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} ./autogen.sh
             elif [ -f "autogen.pl" ]; then
-                export PATH=$tools_path:$PATH && CC=$CC ./autogen.pl
+                PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} ./autogen.pl
             else
-                export PATH=$tools_path:$PATH && CC=$CC autoreconf
+                PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} autoreconf
             fi
         fi
         if [ "$?" != "0" ]; then
@@ -295,7 +293,7 @@ function deploy_build_item() {
     fi
     cd .build || (echo_error $LINENO "directory change error" && exit 1)
     if [ ! -f "config.log" ]; then
-        pdsh -S -w $build_node "cd $PWD && CC=$CC ./config.sh"
+        pdsh -S -w "${build_node}" "cd $PWD && PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} ./config.sh"
         if [ "$?" != "0" ]; then
             echo_error $LINENO "\"$item\" Configure error. Cannot continue."
             mv config.log config.log.bak
@@ -303,7 +301,7 @@ function deploy_build_item() {
         fi
     fi
     if [ ! -f ".deploy_build_flag" ]; then
-        pdsh -S -w $build_node "cd $PWD && CC=$CC make -j $build_cpus"
+        pdsh -S -w "${build_node}" "cd $PWD && PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} make -j $build_cpus"
         ret=$?
         if [ "$ret" != "0" ]; then
             echo_error $LINENO "\"$item\" Build error. Cannot continue."
@@ -311,25 +309,25 @@ function deploy_build_item() {
         fi
         echo 1 >.deploy_build_flag
     fi
-    pdsh -S -w $build_node "cd $PWD && CC=$CC make -j $build_cpus install"
+    pdsh -S -w "${build_node}" "cd $PWD && PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} make -j $build_cpus install"
     ret=$?
     if [ "$?" != "0" ]; then
-        echo_error $LINENO "\"$item\" $(CC=$CC make install) error. Cannot continue."
+        echo_error $LINENO "\"$item\" $(PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} make install) error. Cannot continue."
         exit 1
     fi
 
     if [ $item = "slurm" ]; then
-        pdsh -S -w $build_node "cd $PWD/contribs/pmi && CC=$CC make -j $build_cpus install"
-        pdsh -S -w $build_node "cd $PWD/contribs/pmi2 && CC=$CC make -j $build_cpus install"
+        pdsh -S -w "${build_node}" "cd $PWD/contribs/pmi && PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} make -j $build_cpus install"
+        pdsh -S -w "${build_node}" "cd $PWD/contribs/pmi2 && PATH=${COMPILER_DIR}/bin:$tools_path:${R_PATH} LD_LIBRARY_PATH=${COMPILER_DIR}/lib64:${R_LD_LIBRARY_PATH} make -j $build_cpus install"
     fi
 
-    cd $sdir
+    cd "$sdir" || exit 1
 
-    if [ $(hostname) != "$build_node" ]; then
+    if [ "$(hostname)" != "$build_node" ]; then
         if [ ! -d "$item_inst" ]; then
-            create_dir $item_inst
+            create_dir "${item_inst}"
         fi
-        scp -r $build_node:$item_inst $INSTALL_DIR
+        scp -r "${build_node}:${item_inst}" "${INSTALL_DIR}"
     fi
 }
 
