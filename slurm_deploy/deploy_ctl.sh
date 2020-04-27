@@ -271,16 +271,20 @@ function deploy_build_item() {
         rpath=$(ssh $build_node 'echo $PATH')
         if [ -f "autogen.sh" ]; then
             pdsh -S -w $build_node "export PATH=$tools_path:$rpath ; cd $PWD && CC=$CC ./autogen.sh"
-        else
+        elif [ -f "autogen.pl" ]; then
             pdsh -S -w $build_node "export PATH=$tools_path:$rpath ; cd $PWD && CC=$CC ./autogen.pl"
+        else
+            pdsh -S -w $build_node "export PATH=$tools_path:$rpath ; cd $PWD && CC=$CC autoreconf"
         fi
         ret=$?
         if [ "$ret" != "0" ]; then
             echo_error $LINENO "\"$item\" Remote Autogen error. Tries to run Autogen locally..."
             if [ -f "autogen.sh" ]; then
                 export PATH=$tools_path:$PATH && CC=$CC ./autogen.sh
-            else
+            elif [ -f "autogen.pl" ]; then
                 export PATH=$tools_path:$PATH && CC=$CC ./autogen.pl
+            else
+                export PATH=$tools_path:$PATH && CC=$CC autoreconf
             fi
         fi
         if [ "$?" != "0" ]; then
