@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash -eEx
 
 #
 # Copyright (C) 2020      Mellanox Technologies, Inc.
@@ -17,11 +17,11 @@ if [ -z "$MUNGE_INST" ]; then
     MUNGE_INST="/usr"
 fi
 
-if [ -f $DEPLOY_DIR/.deploy_env ]; then
-    . $DEPLOY_DIR/.deploy_env
+if [ -f "$DEPLOY_DIR/.deploy_env" ]; then
+    #shellcheck source=.deploy_env
+    . "$DEPLOY_DIR/.deploy_env"
 fi
 
-SLURM_SRC=$SRC_DIR/slurm # Where to find SLURM sources.
 CPU_NUM=$(grep -c ^processor /proc/cpuinfo)
 
 function create_dir() {
@@ -29,8 +29,7 @@ function create_dir() {
         echo Can not create directory. Bad param.
         exit 1
     fi
-    mkdir -p $1
-    if [ "$?" != "0" ]; then
+    if ! mkdir -p "$1"; then
         echo "Cannot continue"
         exit 1
     fi
@@ -45,15 +44,7 @@ function check_file() {
 }
 
 function build_log() {
-    echo $(date +"%Y-%m-%d %H:%M:%S.%3N") [$1]: $2 >>$BUILD_DIR/build.log
-}
-
-function check_error() {
-    echo $?
-    if [ "$?" -ne "0" ]; then
-        echo $1 $2
-        exit 1
-    fi
+    echo "$(date +"%Y-%m-%d %H:%M:%S.%3N") [$1]: $2" >>"$BUILD_DIR/build.log"
 }
 
 function item_download() {
@@ -80,9 +71,9 @@ function item_download() {
 
     fix_config_prefix=""
     for arg in $config; do
-        arg_name=$(echo $arg | cut -d= -f1)
-        if [ $arg_name = "--prefix" ]; then
-            REPO_INST=$(echo $arg | cut -d= -f2)
+        arg_name=$(echo "$arg" | cut -d= -f1)
+        if [ "$arg_name" = "--prefix" ]; then
+            REPO_INST=$(echo "$arg" | cut -d= -f2)
         else
             fix_config_prefix="$fix_config_prefix $arg"
         fi
@@ -90,33 +81,34 @@ function item_download() {
     config=" --prefix=$REPO_INST $fix_config_prefix"
 
     if [ ! -d "$SRC_DIR" ]; then
-        mkdir -p $SRC_DIR
-        if [ ! -d $SRC_DIR ]; then
+        mkdir -p "$SRC_DIR"
+        if [ ! -d "$SRC_DIR" ]; then
             echo_error $LINENO "source code directory cen not be created"
             exit 1
         fi
     fi
-    cd $SRC_DIR
+    cd "$SRC_DIR"
 
     echo "\"$REPO_NAME\" repository obtaining..."
-    if [ -d $SRC_DIR/$REPO_NAME ]; then
+    if [ -d "$SRC_DIR/$REPO_NAME" ]; then
         echo_error $LINENO "\"$REPO_NAME\" repository already exist, use it. Please delete to download ..."
     else
         if [ -n "$giturl" ]; then
             if [ -n "$branch" ]; then
-                git clone --progress -b $branch $giturl $REPO_NAME
+                git clone --progress -b "$branch" "$giturl" "$REPO_NAME"
             else
-                git clone --progress $giturl $REPO_NAME
+                git clone --progress "$giturl" "$REPO_NAME"
             fi
+            # shellcheck disable=SC2181
             if [ "$?" != "0" ]; then
                 echo_error $LINENO "\"$REPO_NAME\" Repository can not be obtained. Cannot continue. "
                 exit 1
             fi
         else
-            create_dir $SRC_DIR/$REPO_NAME
-            fname=$(basename $packurl)
-            is_gzip=$(echo $fname | grep "tar\.gz")
-            is_bzip=$(echo $fname | grep "tar\.bz")
+            create_dir "$SRC_DIR/$REPO_NAME"
+            fname=$(basename "$packurl")
+            is_gzip=$(echo "$fname" | grep "tar\.gz")
+            is_bzip=$(echo "$fname" | grep "tar\.bz")
             tar_opts=""
             if [ -n "$is_gzip" ]; then
                 tar_opts="-xz"
@@ -124,30 +116,33 @@ function item_download() {
                 tar_opts="-xj"
             else
                 echo_error $LINENO "\"$REPO_NAME\" Repository can not be obtained: Unknown archive type: $fname, only .gz and .bz2 are supported"
-                rm -rf $SRC_DIR/$REPO_NAME
+                rm -rf "${SRC_DIR:?}/$REPO_NAME"
                 exit 1
             fi
             echo "tar_opts = $tar_opts"
-            if [ ${packurl:0:1} = "/" ]; then
+            if [ "${packurl:0:1}" = "/" ]; then
                 echo "unpacking \"$REPO_NAME\" from local path..."
-                cat $packurl | tar $tar_opts -C $SRC_DIR/$REPO_NAME --strip-components 1
+                # TODO
+                # shellcheck disable=SC2002
+                cat "$packurl" | tar $tar_opts -C "$SRC_DIR/$REPO_NAME" --strip-components 1
             else
-                curl -L $packurl | tar $tar_opts -C $SRC_DIR/$REPO_NAME --strip-components 1
+                curl -L "$packurl" | tar $tar_opts -C "$SRC_DIR/$REPO_NAME" --strip-components 1
             fi
             if [ "0" -ne "${PIPESTATUS[0]}" ]; then
                 echo_error $LINENO "\"$REPO_NAME\" Repository can not be obtained. Cannot continue. "
-                rm -rf $SRC_DIR/$REPO_NAME
+                rm -rf "${SRC_DIR:?}/$REPO_NAME"
                 exit 1
             fi
         fi
 
         if [ -n "$commit" ]; then
-            cd $REPO_SRC
-            git checkout -b test $commit
+            cd "$REPO_SRC"
+            git checkout -b test "$commit"
             cd -
         fi
     fi
 
+    # shellcheck disable=SC2181
     if [ "$?" != "0" ]; then
         echo_error $LINENO "\"$REPO_NAME\": Repository can not be prepared. Cannot continue."
         exit 1
@@ -155,7 +150,7 @@ function item_download() {
 
     build=$REPO_NAME/.build
     if [ ! -d "$build" ]; then
-        create_dir $build
+        create_dir "$build"
     fi
 
     config=$(echo "$config " | sed -e 's/--with-[a-z]*= //g')
@@ -165,18 +160,18 @@ function item_download() {
     fi
 
     # create the configure script for we can configure it later
-    cat >$build/config.sh <<EOF
+    cat >"$build/config.sh" <<EOF
 #!/bin/bash
 
 $REPO_SRC/configure $config
 EOF
-    chmod +x $build/config.sh
-    cd $sdir
+    chmod +x "$build/config.sh"
+    cd "$sdir"
 }
 
 function deploy_item_reset_env() {
-    rm -f $DEPLOY_DIR/.deploy_repo.lst
-    rm -f $DEPLOY_DIR/.deploy_env
+    rm -f "$DEPLOY_DIR/.deploy_repo.lst"
+    rm -f "$DEPLOY_DIR/.deploy_env"
 }
 
 function deploy_item_save_env() {
@@ -185,15 +180,15 @@ function deploy_item_save_env() {
     repo_src=$3
     repo_env_prefix=$4
 
-    eval ${repo_env_prefix}_INST=$repo_inst
-    eval ${repo_env_prefix}_SRC=$repo_src
+    eval "${repo_env_prefix}_INST=$repo_inst"
+    eval "${repo_env_prefix}_SRC=$repo_src"
 
     if [ -n "$repo_inst" ]; then
-        echo "${repo_env_prefix}_INST=$repo_inst # $repo_name install" >>$DEPLOY_DIR/.deploy_env
-        echo "$repo_name $repo_inst" >>$DEPLOY_DIR/.deploy_repo.lst
+        echo "${repo_env_prefix}_INST=$repo_inst # $repo_name install" >>"$DEPLOY_DIR/.deploy_env"
+        echo "$repo_name $repo_inst" >>"$DEPLOY_DIR/.deploy_repo.lst"
     fi
     if [ -n "$repo_src" ]; then
-        echo "${repo_env_prefix}_SRC=$repo_src # $repo_name source" >>$DEPLOY_DIR/.deploy_env
+        echo "${repo_env_prefix}_SRC=$repo_src # $repo_name source" >>"$DEPLOY_DIR/.deploy_env"
     fi
 }
 
@@ -212,6 +207,7 @@ function deploy_source_prepare() {
     item_download "ucx" "$UCX_PACK" "$UCX_URL" "$UCX_INST" "$UCX_BRANCH" "$UCX_COMMIT" "$UCX_CONF"
     deploy_item_save_env "$REPO_NAME" "$REPO_INST" "$REPO_SRC" "UCX"
 
+    # shellcheck disable=SC2153
     item_download "slurm" "$SLURM_PACK" "$SLURM_URL" "$SLURM_INST" "$SLURM_BRANCH" "$SLURM_COMMIT" "$SLURM_CONF --with-ucx=$UCX_INST \
  --with-pmix=$PMIX_INST --with-hwloc=$HWLOC_INST --with-munge=$MUNGE_INST"
     deploy_item_save_env "$REPO_NAME" "$REPO_INST" "$REPO_SRC" "SLURM"
@@ -223,18 +219,21 @@ function deploy_source_prepare() {
 
 function get_item() {
     item_inst=$1
-    item=$(cat $DEPLOY_DIR/.deploy_repo.lst | grep $item_inst | awk '{print $1}')
-    echo $item
+    # TODO
+    # shellcheck disable=SC2002
+    item=$(cat "$DEPLOY_DIR/.deploy_repo.lst" | grep "$item_inst" | awk '{print $1}')
+    echo "$item"
 }
 
 function get_repo_item_lst() {
-    repo_items=$(cat $DEPLOY_DIR/.deploy_repo.lst | awk '{print $2}')
-    echo $repo_items
+    # shellcheck disable=SC2002
+    repo_items=$(cat "$DEPLOY_DIR/.deploy_repo.lst" | awk '{print $2}')
+    echo "$repo_items"
 }
 
 function deploy_build_item() {
     item_inst=$1
-    item=$(get_item $item_inst)
+    item=$(get_item "$item_inst")
     light=$2
 
     sdir=$(pwd)
@@ -242,29 +241,27 @@ function deploy_build_item() {
     distribute_nodes=$(distribute_get_nodes) # nodes on which the software will be distributed
     build_node=$(hostname)
     if [ -n "$distribute_nodes" ]; then
-        build_node=$(scontrol show hostname $distribute_nodes | head -n 1) # get first node for run build on it
+        build_node=$(scontrol show hostname "$distribute_nodes" | head -n 1) # get first node for run build on it
     fi
 
-    build_cpus=$(ssh $build_node "grep -c ^processor /proc/cpuinfo")
+    build_cpus=$(ssh "$build_node" "grep -c ^processor /proc/cpuinfo")
 
-    cd $SRC_DIR/$item
-    echo Starting \"$item\" build
+    cd "$SRC_DIR/$item"
+    echo "Starting \"$item\" build"
 
-    # add tools path
-    tools_installed=$(ssh $build_node "test ! -d $INSTALL_DIR/tools/bin")
-    if [ $(
-        ssh $build_node test ! -d $INSTALL_DIR/tools/bin
+    if [ "$(
+        ssh "$build_node" test ! -d "$INSTALL_DIR/tools/bin"
         echo $?
-    ) ]; then
+    )" ]; then
         tools_path="$INSTALL_DIR/tools/bin"
     fi
 
     if [ ! -f "configure" ]; then
-        rpath=$(ssh $build_node 'echo $PATH')
+        rpath=$(ssh "$build_node" 'echo $PATH')
         if [ -f "autogen.sh" ]; then
-            pdsh -S -w $build_node "export PATH=$tools_path:$rpath ; cd $PWD && ./autogen.sh"
+            pdsh -S -w "$build_node" "export PATH=$tools_path:$rpath ; cd $PWD && ./autogen.sh"
         else
-            pdsh -S -w $build_node "export PATH=$tools_path:$rpath ; cd $PWD && ./autogen.pl"
+            pdsh -S -w "$build_node" "export PATH=$tools_path:$rpath ; cd $PWD && ./autogen.pl"
         fi
         ret=$?
         if [ "$ret" != "0" ]; then
@@ -275,6 +272,7 @@ function deploy_build_item() {
                 export PATH=$tools_path:$PATH && ./autogen.pl
             fi
         fi
+        # shellcheck disable=SC2181
         if [ "$?" != "0" ]; then
             echo_error $LINENO "\"$item\" Autogen error. Cannot continue."
             rm configure 2>/dev/null
@@ -283,7 +281,8 @@ function deploy_build_item() {
     fi
     cd .build || (echo_error $LINENO "directory change error" && exit 1)
     if [ ! -f "config.log" ]; then
-        pdsh -S -w $build_node "cd $PWD && ./config.sh"
+        pdsh -S -w "$build_node" "cd $PWD && ./config.sh"
+        # shellcheck disable=SC2181
         if [ "$?" != "0" ]; then
             echo_error $LINENO "\"$item\" Configure error. Cannot continue."
             mv config.log config.log.bak
@@ -291,7 +290,7 @@ function deploy_build_item() {
         fi
     fi
     if [ ! -f ".deploy_build_flag" ]; then
-        pdsh -S -w $build_node "cd $PWD && make -j $build_cpus"
+        pdsh -S -w "$build_node" "cd $PWD && make -j $build_cpus"
         ret=$?
         if [ "$ret" != "0" ]; then
             echo_error $LINENO "\"$item\" Build error. Cannot continue."
@@ -299,30 +298,32 @@ function deploy_build_item() {
         fi
         echo 1 >.deploy_build_flag
     fi
-    pdsh -S -w $build_node "cd $PWD && make -j $build_cpus install"
+    pdsh -S -w "$build_node" "cd $PWD && make -j $build_cpus install"
     ret=$?
+    # shellcheck disable=SC2181
     if [ "$?" != "0" ]; then
         echo_error $LINENO "\"$item\" $(make install) error. Cannot continue."
         exit 1
     fi
 
-    if [ $item = "slurm" ]; then
-        pdsh -S -w $build_node "cd $PWD/contribs/pmi && make -j $build_cpus install"
-        pdsh -S -w $build_node "cd $PWD/contribs/pmi2 && make -j $build_cpus install"
+    if [ "$item" = "slurm" ]; then
+        pdsh -S -w "$build_node" "cd $PWD/contribs/pmi && make -j $build_cpus install"
+        pdsh -S -w "$build_node" "cd $PWD/contribs/pmi2 && make -j $build_cpus install"
     fi
 
-    if [ $item = "ompi" ]; then
+    if [ "$item" = "ompi" ]; then
         # TODO: tmp workaround
-        rm -f $SRC_DIR/$item/prrte/src/include/prrte_config.h
+        echo "INFO: $SRC_DIR/$item/prrte/src/include/prrte_config.h will be removed"
+        rm -f "$SRC_DIR/$item/prrte/src/include/prrte_config.h"
     fi
 
-    cd $sdir
+    cd "$sdir"
 
-    if [ $(hostname) != "$build_node" ]; then
+    if [ "$(hostname)" != "$build_node" ]; then
         if [ ! -d "$item_inst" ]; then
-            create_dir $item_inst
+            create_dir "$item_inst"
         fi
-        scp -r $build_node:$item_inst $INSTALL_DIR
+        scp -r "$build_node:$item_inst" "$INSTALL_DIR"
     fi
 }
 
@@ -331,7 +332,7 @@ function deploy_build_all() {
 
     if [ ! -f "$DEPLOY_DIR/.deploy_repo.lst" ]; then
         echo "Source code does not ready, please try prepare it by cmd:"
-        echo ./$(basename "$0") " source_prepare"
+        echo "./$(basename "$0") source_prepare"
         exit 1
     fi
     repo_list=$(get_repo_item_lst)
@@ -340,23 +341,23 @@ function deploy_build_all() {
         exit 1
     fi
 
-    cd $SRC_DIR
+    cd "$SRC_DIR"
     for item_inst in $repo_list; do
-        item=$(get_item $item_inst)
-        if [ -f $item/.build/config.sh ]; then
-            deploy_build_item $item_inst
+        item=$(get_item "$item_inst")
+        if [ -f "$item/.build/config.sh" ]; then
+            deploy_build_item "$item_inst"
         fi
     done
 
     slurm_finalize_install
 
-    cd $sdir
+    cd "$sdir"
 
     deploy_env_gen
 }
 
 function deploy_build_clean() {
-    #    //TODO
+    # TODO
     echo deploy_build_clean
 }
 
@@ -365,38 +366,37 @@ function deploy_slurm_update_ligth() {
     slurm_build_update
     slurm_finalize_install
     slurm_distribute
-    cd $sdir
+    cd "$sdir"
 }
 
 function deploy_slurm_pmix_update() {
     sdir=$(pwd)
     nodes=$(distribute_get_nodes)
-    item=$(get_item $SLURM_INST)
-    cd $SRC_DIR/$item/.build/src/plugins/mpi/pmix
-    make -j $CPU_NUM clean
-    make -j $CPU_NUM install
+    item=$(get_item "$SLURM_INST")
+    cd "$SRC_DIR/$item/.build/src/plugins/mpi/pmix"
+    make -j "$CPU_NUM" clean
+    make -j "$CPU_NUM" install
     # shellcheck disable=SC2045
-    for file in $(ls $SLURM_INST/lib/slurm/mpi_pmix*); do
-        copy_remote_nodes $nodes $file $SLURM_INST/lib/slurm/
+    for file in $(ls "$SLURM_INST/lib/slurm/mpi_pmix"*); do
+        copy_remote_nodes "$nodes" "$file" "$SLURM_INST/lib/slurm/"
     done
-    cd $sdir
-
+    cd "$sdir"
 }
 
 function deploy_slurm_update() {
     sdir=$(pwd)
     light=$1
     nodes=$(distribute_get_nodes)
-    deploy_cleanup_item $SLURM_INST
+    deploy_cleanup_item "$SLURM_INST"
     if [ "$light" == "light" ]; then
-        item=$(get_item $SLURM_INST)
-        cd $SRC_DIR/$item
-        make -j $CPU_NUM distclean
+        item=$(get_item "$SLURM_INST")
+        cd "$SRC_DIR/$item"
+        make -j "$CPU_NUM" distclean
         ./config.sh
     fi
-    deploy_build_item $SLURM_INST
-    deploy_distribute_item $SLURM_INST
-    cd $sdir
+    deploy_build_item "$SLURM_INST"
+    deploy_distribute_item "$SLURM_INST"
+    cd "$sdir"
 }
 
 function distribute_get_nodes() {
@@ -410,10 +410,10 @@ function distribute_get_nodes() {
         return
     fi
     head_node=$(node_is_head)
-    if [ ! -z $head_node ]; then
+    if [ -n "$head_node" ]; then
         nodes=$(get_node_list_wo_head)
     fi
-    echo $nodes
+    echo "$nodes"
 }
 
 function deploy_distribute_item() {
@@ -421,15 +421,15 @@ function deploy_distribute_item() {
     nodes=$(distribute_get_nodes)
     echo -ne "$nodes: copying $item_inst... "
     pdir="$(dirname "$item_inst")"
-    exec_remote_nodes $nodes mkdir -p $pdir
-    copy_remote_nodes $nodes $item_inst $pdir
+    exec_remote_nodes "$nodes" mkdir -p "$pdir"
+    copy_remote_nodes "$nodes" "$item_inst" "$pdir"
     echo "OK"
 }
 
 function deploy_distribute_all() {
     items_list=$(get_repo_item_lst)
     for item_inst in $items_list; do
-        deploy_distribute_item $item_inst
+        deploy_distribute_item "$item_inst"
     done
 }
 
@@ -437,7 +437,7 @@ function deploy_cleanup_item() {
     item_inst=$1
     nodes=$(distribute_get_nodes)
     echo -ne "$nodes: removing '$item_inst'... "
-    exec_remote_nodes $nodes rm -rf $item_inst
+    exec_remote_nodes "$nodes" rm -rf "$item_inst"
     echo "OK"
 }
 
@@ -447,17 +447,17 @@ function deploy_cleanup_all() {
 
     items_list=$(get_repo_item_lst)
     for item_inst in $items_list; do
-        deploy_cleanup_item $item_inst
+        deploy_cleanup_item "$item_inst"
     done
     if [ -d "$INSTALL_DIR" ]; then
         if [ -n "$(sanity_check)" ]; then
             echo_error $LINENO "Error sanity check"
             exit 1
         fi
-        rm -rf $INSTALL_DIR
+        rm -rf "$INSTALL_DIR"
     fi
     nodes=$(distribute_get_nodes)
-    exec_remote_nodes $nodes rm -rf $INSTALL_DIR
+    exec_remote_nodes "$nodes" rm -rf "$INSTALL_DIR"
 }
 
 function deploy_cleanup_remote() {
@@ -466,10 +466,10 @@ function deploy_cleanup_remote() {
 
     items_list=$(get_repo_item_lst)
     for item_inst in $items_list; do
-        deploy_cleanup_item $item_inst
+        deploy_cleanup_item "$item_inst"
     done
     nodes=$(distribute_get_nodes)
-    exec_remote_nodes $nodes rm -rf $INSTALL_DIR
+    exec_remote_nodes "$nodes" rm -rf "$INSTALL_DIR"
 }
 
 function deploy_cleanup_tmp() {
@@ -480,10 +480,10 @@ function deploy_cleanup_tmp() {
         echo_error $LINENO "Error: Slurm installation directory does not exist"
         exit
     fi
-    rm -rf $INSTALL_DIR/slurm/tmp/*
-    rm -rf $INSTALL_DIR/slurm/var/*
-    exec_remote_nodes $nodes rm -rf $INSTALL_DIR/slurm/tmp/*
-    exec_remote_nodes $nodes rm -rf $INSTALL_DIR/slurm/var/*
+    rm -rf "$INSTALL_DIR/slurm/tmp/"*
+    rm -rf "$INSTALL_DIR/slurm/var/"*
+    exec_remote_nodes "$nodes" rm -rf "$INSTALL_DIR/slurm/tmp/"*
+    exec_remote_nodes "$nodes" rm -rf "$INSTALL_DIR/slurm/var/"*
     echo "OK"
 }
 
@@ -491,18 +491,19 @@ function deploy_slurm_start() {
     distribute_nodes=$(distribute_get_nodes) # nodes on which the software will be distributed
     first_node=$(hostname)
     if [ -n "$distribute_nodes" ]; then
-        first_node=$(scontrol show hostname $distribute_nodes | head -n 1) # get first node for run build on it
+        first_node=$(scontrol show hostname "$distribute_nodes" | head -n 1) # get first node for run build on it
     fi
-    slurm_ctl_node=$(ssh $first_node cat $SLURM_INST/etc/local.conf | grep ControlMachine | cut -f2 -d"=")
-    exec_remote_as_user_nodes $slurm_ctl_node $SLURM_INST/sbin/slurmctld
+    # shellcheck disable=SC2029
+    slurm_ctl_node=$(ssh "$first_node" cat "$SLURM_INST/etc/local.conf" | grep ControlMachine | cut -f2 -d"=")
+    exec_remote_as_user_nodes "$slurm_ctl_node" "$SLURM_INST/sbin/slurmctld"
     sleep 3
     slurm_launch
 }
 
 function deploy_slurm_stop() {
     slurm_stop_instances
-    slurm_ctl_node=$(cat $SLURM_INST/etc/local.conf | grep ControlMachine | cut -f2 -d"=")
-    exec_remote_as_user_nodes $slurm_ctl_node "$FILES/slurm_kill.sh $SLURM_INST"
+    slurm_ctl_node=$(grep ControlMachine "$SLURM_INST/etc/local.conf" | cut -f2 -d"=")
+    exec_remote_as_user_nodes "$slurm_ctl_node" "$FILES/slurm_kill.sh $SLURM_INST"
 }
 
 function slurm_prepare_conf() {
@@ -513,15 +514,15 @@ function slurm_prepare_conf() {
 
     slurm_conf=$1
 
-    mkdir -p $SLURM_INST/etc/
+    mkdir -p "$SLURM_INST/etc/"
 
     if [ -n "$slurm_conf" ]; then
-        if [ ! -f $slurm_conf ]; then
+        if [ ! -f "$slurm_conf" ]; then
             echo_error $LINENO "Can not set Slurm config file: file does not exist"
             exit 1
         fi
         echo "Use config $slurm_conf"
-        cp -f $slurm_conf $SLURM_INST/etc/local.conf
+        cp -f "$slurm_conf" "$SLURM_INST/etc/local.conf"
     else
         local tdir=./.conf_tmp
         rm -fR $tdir
@@ -530,10 +531,10 @@ function slurm_prepare_conf() {
         compute_node=$(get_first_node)
 
         #get CPU params from the compute node
-        CPUS=$(pdsh -N -w $compute_node nproc)
-        THREAD_PER_CORE=$(pdsh -N -w $compute_node lscpu | grep -i "Thread(s) per core:" | cut -d":" -f2 | tr -d '[:space:]')
-        CORE_PER_SOCK=$(pdsh -N -w $compute_node lscpu | grep -i "Core(s) per socket" | cut -d":" -f2 | tr -d '[:space:]')
-        SOCKETS=$(pdsh -N -w $compute_node lscpu | grep -i "Socket(s)" | cut -d":" -f2 | tr -d '[:space:]')
+        CPUS=$(pdsh -N -w "$compute_node" nproc)
+        THREAD_PER_CORE=$(pdsh -N -w "$compute_node" lscpu | grep -i "Thread(s) per core:" | cut -d":" -f2 | tr -d '[:space:]')
+        CORE_PER_SOCK=$(pdsh -N -w "$compute_node" lscpu | grep -i "Core(s) per socket" | cut -d":" -f2 | tr -d '[:space:]')
+        SOCKETS=$(pdsh -N -w "$compute_node" lscpu | grep -i "Socket(s)" | cut -d":" -f2 | tr -d '[:space:]')
         CONTROL_MACHINE=$(hostname)
         CFG_NODE_LIST=$(get_node_list)
 
@@ -541,8 +542,9 @@ function slurm_prepare_conf() {
             SLURM_JOB_PARTITION="deploy"
         fi
 
-        #gnerate a confug file
-        cat $FILES/local.conf.in |
+        #generate a config file
+        # shellcheck disable=SC2002
+        cat "$FILES/local.conf.in" |
             sed -e "s/@cluster_name@/deploy/g" |
             sed -e "s/@node_cpus@/$CPUS/g" |
             sed -e "s/@node_sock_num@/$SOCKETS/g" |
@@ -552,28 +554,28 @@ function slurm_prepare_conf() {
             sed -e "s/@partition@/$SLURM_JOB_PARTITION/g" |
             sed -e "s/@node_ctl@/$CONTROL_MACHINE/g" >$tdir/local.conf
 
-        cp $tdir/local.conf $SLURM_INST/etc/
+        cp $tdir/local.conf "$SLURM_INST/etc/"
         rm -fR $tdir
     fi
 
-    SLURM_INST_ESC=$(escape_path $SLURM_INST)
-    cat $FILES/slurm.conf.in |
+    SLURM_INST_ESC=$(escape_path "$SLURM_INST")
+    # shellcheck disable=SC2002
+    cat "$FILES/slurm.conf.in" |
         sed -e "s/@SLURM_INST@/$SLURM_INST_ESC/g" |
-        sed -e "s/@SLURM_USER@/$SLURM_USER/g" >$SLURM_INST/etc/slurm.conf
+        sed -e "s/@SLURM_USER@/$SLURM_USER/g" >"$SLURM_INST/etc/slurm.conf"
 
     nodes=$(distribute_get_nodes)
-    copy_remote_nodes $nodes $SLURM_INST/etc $SLURM_INST
+    copy_remote_nodes "$nodes" "$SLURM_INST/etc" "$SLURM_INST"
 }
 
 function deploy_ompi_remove_files() {
-    remove_file_list=$(cat $1)
+    remove_file_list=$(cat "$1")
     i=0
     for file in $remove_file_list; do
-        rm_files=$(find $OMPI_INST -name "$file")
+        rm_files=$(find "$OMPI_INST" -name "$file")
         for rm_file in $rm_files; do
             echo -ne "$rm_file      "
-            $(rm -f $rm_file)
-            if [ "$?" = "0" ]; then
+            if rm -f "$rm_file"; then
                 i=$((i + 1))
                 echo "removed"
             fi
@@ -589,21 +591,19 @@ function deploy_env_gen() {
     items_list=$(get_repo_item_lst)
     for item_inst in $items_list; do
         local item_env
-        item_env=$(cat $DEPLOY_DIR/.deploy_env | grep $item_inst | cut -f2 -d "=" | awk '{print $1}')
+        item_env=$(grep "$item_inst" "$DEPLOY_DIR/.deploy_env" | cut -f2 -d "=" | awk '{print $1}')
         path=$path:$item_env/bin
         libs=$path:$item_env/lib
     done
 
-    cat >$env_file <<EOF
+    cat >"$env_file" <<EOF
 #!/bin/bash
 
 export PATH=$path:$PATH
 export LD_LIBRARY_PATH=$libs:$LD_LIBRARY_PATH
 
 EOF
-    chmod +x $env_file
-
-    if [ "$?" != "0" ]; then
+    if ! chmod +x "$env_file"; then
         echo "Cannot generate env file"
         exit 1
     fi
