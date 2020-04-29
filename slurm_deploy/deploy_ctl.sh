@@ -163,6 +163,9 @@ function item_download() {
     cat >"$build/config.sh" <<EOF
 #!/bin/bash
 
+echo "INFO: \$PATH"
+echo "INFO: \$LD_LIBRARY_PATH"
+
 $REPO_SRC/configure $config
 EOF
     chmod +x "$build/config.sh"
@@ -281,7 +284,7 @@ function deploy_build_item() {
     fi
     cd .build || (echo_error $LINENO "directory change error" && exit 1)
     if [ ! -f "config.log" ]; then
-        pdsh -S -w "$build_node" "cd $PWD && ./config.sh"
+        pdsh -S -w "$build_node" "cd $PWD && LD_LIBRARY_PATH=${HWLOC_INST}/lib:${LIBEV_INST}/lib:${PMIX_INST}/lib:${LD_LIBRARY_PATH} ./config.sh"
         # shellcheck disable=SC2181
         if [ "$?" != "0" ]; then
             echo_error $LINENO "\"$item\" Configure error. Cannot continue."
