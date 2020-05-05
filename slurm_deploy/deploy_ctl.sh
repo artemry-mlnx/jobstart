@@ -159,14 +159,22 @@ function item_download() {
         echo "\"$REPO_NAME\": the following config will be configure : \"$config\""
     fi
 
+    if [ "${REPO_NAME}" = "ompi" ]; then
+        CONFIGURE_EXTRA_ARGS="${OMPI_CONFIGURE_EXTRA_ARGS}"
+    fi
+
+    echo "INFO: REPO_NAME = ${REPO_NAME}"
+    echo "INFO: CONFIGURE_EXTRA_ARGS = ${CONFIGURE_EXTRA_ARGS}"
+
     # create the configure script for we can configure it later
     cat >"$build/config.sh" <<EOF
 #!/bin/bash
 
 echo "INFO: \$PATH"
 echo "INFO: \$LD_LIBRARY_PATH"
+echo "INFO: $REPO_SRC/configure ${CONFIGURE_EXTRA_ARGS} $config"
 
-$REPO_SRC/configure $config
+$REPO_SRC/configure ${CONFIGURE_EXTRA_ARGS} $config
 EOF
     chmod +x "$build/config.sh"
     cd "$sdir"
@@ -243,6 +251,7 @@ function deploy_build_item() {
 
     distribute_nodes=$(distribute_get_nodes) # nodes on which the software will be distributed
     build_node=$(hostname)
+
     if [ -n "$distribute_nodes" ]; then
         build_node=$(scontrol show hostname "$distribute_nodes" | head -n 1) # get first node for run build on it
     fi
@@ -266,7 +275,9 @@ function deploy_build_item() {
         else
             pdsh -S -w "$build_node" "export PATH=$tools_path:$rpath ; cd $PWD && ./autogen.pl"
         fi
+
         ret=$?
+
         if [ "$ret" != "0" ]; then
             echo_error $LINENO "\"$item\" Remote Autogen error. Tries to run Autogen locally..."
             if [ -f "autogen.sh" ]; then
@@ -275,6 +286,7 @@ function deploy_build_item() {
                 export PATH=$tools_path:$PATH && ./autogen.pl
             fi
         fi
+
         # shellcheck disable=SC2181
         if [ "$?" != "0" ]; then
             echo_error $LINENO "\"$item\" Autogen error. Cannot continue."
@@ -282,7 +294,9 @@ function deploy_build_item() {
             exit 1
         fi
     fi
+
     cd .build || (echo_error $LINENO "directory change error" && exit 1)
+
     if [ ! -f "config.log" ]; then
         pdsh -S -w "$build_node" "cd $PWD && LD_LIBRARY_PATH=${HWLOC_INST}/lib:${LIBEV_INST}/lib:${PMIX_INST}/lib:${LD_LIBRARY_PATH} ./config.sh"
         # shellcheck disable=SC2181
@@ -292,6 +306,7 @@ function deploy_build_item() {
             exit 1
         fi
     fi
+
     if [ ! -f ".deploy_build_flag" ]; then
         pdsh -S -w "$build_node" "cd $PWD && make -j $build_cpus"
         ret=$?
@@ -301,9 +316,11 @@ function deploy_build_item() {
         fi
         echo 1 >.deploy_build_flag
     fi
+
     pdsh -S -w "$build_node" "cd $PWD && make -j $build_cpus install"
     ret=$?
     # shellcheck disable=SC2181
+
     if [ "$?" != "0" ]; then
         echo_error $LINENO "\"$item\" $(make install) error. Cannot continue."
         exit 1
